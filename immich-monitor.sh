@@ -6,7 +6,7 @@ NAME=$(basename "$0" .sh)
 # Configuration
 CONTAINER_FILTER="immich"
 IDLE_DURATION=120           # Seconds to stay under CPU threshold
-CHECK_INTERVAL=20           # Interval between checks (seconds)
+CHECK_INTERVAL=3            # Interval between checks (seconds)
 PORT_WAKEUP=2283            # Port to watch for wake-up activity
 CPU_THRESHOLD=1             # Below this CPU usage is considered idle
 
