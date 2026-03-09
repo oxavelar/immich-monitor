@@ -16,7 +16,7 @@ SCHEDULED_STARTS=("00:05" "01:55")  # Align with nightly tasks and backups
 SCHEDULED_DURATIONS=(1200 1200)     # time in seconds
 
 # Logging
-# if using systmd set to "" to use stdout logging 
+# if using not systmd set to "/dev/kmsg" or custom logfile to use orriginal logging 
 LOGFILE="/dev/kmsg"
 
 # Internal
@@ -53,6 +53,16 @@ if [[ -n "${LOGFILE:-}" ]]; then
   exec >> "$LOGFILE" 2>&1
 fi
 
+# If not running under systemd, fork into background
+if [ -z "$INVOCATION_ID" ]; then
+    # Already in background? If so, don't fork again
+    if [ -z "$IMMICH_MONITOR_FORKED" ]; then
+        export IMMICH_MONITOR_FORKED=1
+        nohup "$0" "$@" >/dev/null 2>&1 &
+        exit 0
+    fi
+fi
+
 cpuavg() {
   docker ps -q --filter "name=$CONTAINER_FILTER" | xargs -r -I {} \
     docker stats {} --no-stream --format "{{.CPUPerc}}" | sed 's/%//' \
@@ -62,7 +72,7 @@ cpuavg() {
 freeze() {
   echo "$NAME: [INFO] $CONTAINER_FILTER containers: freeze"
   docker ps --filter "name=$CONTAINER_FILTER" --format "{{.Names}}" | sort -r | while read -r name; do
-    docker pause "$name" > /dev/null
+    docker pause "$name" > /dev/null 2>&1 || true
   done
   frozen=true
 }
@@ -70,7 +80,7 @@ freeze() {
 resume() {
   echo "$NAME: [INFO] $CONTAINER_FILTER containers: resume"
   docker ps --filter "name=$CONTAINER_FILTER" --format "{{.Names}}" | sort | while read -r name; do
-    docker unpause "$name" > /dev/null
+    docker unpause "$name" > /dev/null 2>&1 || true
   done
   frozen=false
   last_unpause_time=$(date +%s)
@@ -154,4 +164,4 @@ while true; do
 
   sleep "$CHECK_INTERVAL"
 done
-) &
+)
