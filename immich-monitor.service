@@ -16,6 +16,7 @@ Group=docker
 # environment variables
 # overide script logging with STDOUT
 Environment="LOGFILE="
+Environment="DOCKER_CONFIG=/var/lib/immichmonitor-docker"
 
 # give it a clean working directory
 WorkingDirectory=/usr/local/bin
@@ -30,7 +31,6 @@ ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectKernelLogs=true
 PrivateDevices=true
-PrivateNetwork=true
 ReadWritePaths=/var/run/docker.sock
 CapabilityBoundingSet=
 AmbientCapabilities=
