@@ -1,0 +1,40 @@
+[Unit]
+Description=Immich Idle monitor
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/immich-monitor.sh
+Restart=always
+RestartSec=5
+
+# ensure it has access to docker
+User=root
+Group=docker
+
+# environment variables
+# overide script logging with STDOUT
+Environment="LOGFILE="
+
+# --- Optional: hardening ---
+NoNewPrivileges=no
+ProtectSystem=no
+ProtectHome=read-only
+PrivateTmp=yes
+PrivateDevices=no
+PrivateMounts=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+CapabilityBoundingSet=CAP_NET_ADMIN
+AmbientCapabilities=CAP_NET_ADMIN
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+
+# ensure it stops cleanly
+KillSignal=SIGTERM
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target
