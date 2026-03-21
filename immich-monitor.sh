@@ -47,6 +47,23 @@ check_existing_instance() {
   fi
 }
 
+# Validate scheduled starts configuration
+validate_schedule_config() {
+  for i in "${!SCHEDULED_STARTS[@]}"; do
+    local time_str="${SCHEDULED_STARTS[$i]}"
+    if [[ ! "$time_str" =~ ^[0-2][0-9]:[0-5][0-9]$ ]]; then
+      echo "$NAME: [ERROR] Invalid time format in SCHEDULED_STARTS[$i]: $time_str (expected HH:MM)"
+      exit 1
+    fi
+    
+    local duration="${SCHEDULED_DURATIONS[$i]}"
+    if [[ ! "$duration" =~ ^[0-9]+$ ]] || (( duration <= 0 )); then
+      echo "$NAME: [ERROR] Invalid duration in SCHEDULED_DURATIONS[$i]: $duration (expected positive integer seconds)"
+      exit 1
+    fi
+  done
+}
+
 # Validate configuration
 validate_schedule_config
 
@@ -71,22 +88,7 @@ if [[ -n "${LOGFILE:-}" ]]; then
   exec >> "$LOGFILE" 2>&1
 fi
 
-# Validate scheduled starts configuration
-validate_schedule_config() {
-  for i in "${!SCHEDULED_STARTS[@]}"; do
-    local time_str="${SCHEDULED_STARTS[$i]}"
-    if [[ ! "$time_str" =~ ^[0-2][0-9]:[0-5][0-9]$ ]]; then
-      echo "$NAME: [ERROR] Invalid time format in SCHEDULED_STARTS[$i]: $time_str (expected HH:MM)"
-      exit 1
-    fi
-    
-    local duration="${SCHEDULED_DURATIONS[$i]}"
-    if [[ ! "$duration" =~ ^[0-9]+$ ]] || (( duration <= 0 )); then
-      echo "$NAME: [ERROR] Invalid duration in SCHEDULED_DURATIONS[$i]: $duration (expected positive integer seconds)"
-      exit 1
-    fi
-  done
-}
+# If not running under systemd, fork into background
 if [ -z "$INVOCATION_ID" ]; then
     # Check for existing instances
     check_existing_instance
