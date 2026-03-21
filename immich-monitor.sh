@@ -8,7 +8,7 @@ CONTAINER_FILTER="immich"
 IDLE_DURATION=20            # Seconds to stay under CPU threshold
 CHECK_INTERVAL=0.250        # Interval between checks (seconds) - base value
 IDLE_CHECK_INTERVAL=2.0     # Slower interval when frozen
-PORT_WAKEUP=2283            # Port to watch for wake-up activity
+PORT_WAKEUP=80              # Port to watch for wake-up activity
 CPU_THRESHOLD=1             # Below this CPU usage is considered idle
 COOLDOWN_AFTER_UNPAUSE=300  # Optional, set to 0 to disable
 
@@ -227,6 +227,7 @@ freeze() {
       }
     fi
   done <<< "$containers"
+  echo "$NAME: [INFO] Container freeze sequence completed"
   frozen=true
 }
 
@@ -240,16 +241,86 @@ resume() {
     return 1
   fi
   
+  # Resume containers sequentially with health checks
   while IFS= read -r name; do
-    if [[ -n "$name" ]] && docker ps --filter "name=^${name}$" --format "{{.Names}}" 2>/dev/null | grep -q "^${name}$"; then
+    if [[ -n "$name" ]]; then
       echo "$NAME: [INFO] resuming container: $name"
       docker unpause "$name" > /dev/null 2>&1 || {
         echo "$NAME: [WARN] Failed to resume container: $name"
+        continue
       }
+      
+      # Wait for container to stabilize
+      sleep 1
+      
+      # Check if container is healthy after resume
+      if ! check_single_container_health "$name"; then
+        echo "$NAME: [INFO] Restarting unhealthy container: $name"
+        docker restart "$name" >/dev/null 2>&1 || {
+          echo "$NAME: [ERROR] Failed to restart container: $name"
+          continue
+        }
+        
+        # Wait for restart and verify health
+        sleep 3
+        if ! check_single_container_health "$name"; then
+          echo "$NAME: [ERROR] Container $name still unhealthy after restart"
+        fi
+      fi
     fi
   done <<< "$containers"
+  
+  echo "$NAME: [INFO] Container resume sequence completed"
   frozen=false
   last_unpause_time=$(date +%s)
+}
+
+# Check health of a single container
+check_single_container_health() {
+  local name="$1"
+  
+  # Check if container is running
+  if ! docker ps --filter "name=^${name}$" --filter "status=running" --format "{{.Names}}" 2>/dev/null | grep -q "^${name}$"; then
+    echo "$NAME: [WARN] Container $name is not running"
+    return 1
+  fi
+  
+  # Check container health (if healthcheck is configured)
+  local health_status
+  health_status=$(docker inspect "$name" --format "{{.State.Health.Status}}" 2>/dev/null || echo "unknown")
+  
+  if [[ "$health_status" == "healthy" ]]; then
+    echo "$NAME: [DEBUG] Container $name health status: healthy"
+    return 0
+  elif [[ "$health_status" == "unhealthy" ]]; then
+    echo "$NAME: [WARN] Container $name health status: unhealthy"
+    return 1
+  elif [[ "$health_status" == "unknown" ]]; then
+    # No healthcheck configured, check if container is responding
+    if [[ "$name" == *"postgres"* ]]; then
+      if docker exec "$name" pg_isready -U postgres -h localhost >/dev/null 2>&1; then
+        echo "$NAME: [DEBUG] PostgreSQL container $name responding"
+        return 0
+      else
+        echo "$NAME: [WARN] PostgreSQL container $name not responding"
+        return 1
+      fi
+    elif [[ "$name" == *"redis"* ]]; then
+      if docker exec "$name" redis-cli ping >/dev/null 2>&1; then
+        echo "$NAME: [DEBUG] Redis container $name responding"
+        return 0
+      else
+        echo "$NAME: [WARN] Redis container $name not responding"
+        return 1
+      fi
+    else
+      # For other containers without healthchecks, assume healthy if running
+      echo "$NAME: [DEBUG] Container $name running (no healthcheck)"
+      return 0
+    fi
+  fi
+
+  return 0
 }
 
 wakeup() {
