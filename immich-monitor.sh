@@ -17,8 +17,13 @@ SCHEDULED_STARTS=("00:05" "01:55")  # Align with nightly tasks and backups
 SCHEDULED_DURATIONS=(1200 1200)     # time in seconds
 
 # Logging
-# if using systmd set to "" to use stdout logging
-LOGFILE="/dev/kmsg"
+# When running under systemd (INVOCATION_ID set): output goes to stdout/stderr (captured by systemd)
+# When running standalone: optionally redirect to /dev/kmsg
+LOGFILE=""
+if [ -z "$INVOCATION_ID" ]; then
+  # Only redirect to kmsg when NOT running under systemd
+  LOGFILE="/dev/kmsg"
+fi
 
 # Internal
 frozen=false
@@ -83,8 +88,8 @@ while ! docker info > /dev/null 2>&1; do
   sleep "$CHECK_INTERVAL"
 done
 
-# Redirect all stdout and stderr to /dev/kmsg for kernel log visibility
-if [[ -n "${LOGFILE:-}" ]]; then
+# Redirect all stdout and stderr based on systemd presence
+if [[ -n "${LOGFILE:-}" ]] && [[ "$LOGFILE" == "/dev/kmsg" ]]; then
   exec >> "$LOGFILE" 2>&1
 fi
 
@@ -179,49 +184,69 @@ discover_containers() {
 
 # Get containers in freeze order (reverse dependency)
 get_freeze_order() {
-  discover_containers | tac  # Reverse the order for freezing
+  local result
+  result=$(discover_containers 2>/dev/null | tac 2>/dev/null || true)
+  
+  # Fallback to hardcoded array if dynamic discovery fails
+  if [[ -z "$result" ]]; then
+    printf '%s\n' "${FREEZE_ORDER[@]}"
+  else
+    echo "$result"
+  fi
 }
 
 # Get containers in resume order (dependency order)
 get_resume_order() {
-  discover_containers
+  local result
+  result=$(discover_containers 2>/dev/null || true)
+  
+  # Fallback to hardcoded array if dynamic discovery fails
+  if [[ -z "$result" ]]; then
+    printf '%s\n' "${RESUME_ORDER[@]}"
+  else
+    echo "$result"
+  fi
 }
 
 freeze() {
   echo "$NAME: [INFO] $CONTAINER_FILTER containers: freeze"
   local containers
-  containers=$(get_freeze_order) || {
-    echo "$NAME: [ERROR] Failed to discover containers for freezing"
-    return 1
-  }
+  containers=$(get_freeze_order)
   
-  for name in $containers; do
-    if docker ps --filter "name=^${name}$" --format "{{.Names}}" | grep -q "^${name}$"; then
+  if [[ -z "$containers" ]]; then
+    echo "$NAME: [ERROR] No containers found for freezing"
+    return 1
+  fi
+  
+  while IFS= read -r name; do
+    if [[ -n "$name" ]] && docker ps --filter "name=^${name}$" --format "{{.Names}}" 2>/dev/null | grep -q "^${name}$"; then
       echo "$NAME: [INFO] pausing container: $name"
       docker pause "$name" > /dev/null 2>&1 || {
         echo "$NAME: [WARN] Failed to pause container: $name"
       }
     fi
-  done
+  done <<< "$containers"
   frozen=true
 }
 
 resume() {
   echo "$NAME: [INFO] $CONTAINER_FILTER containers: resume"
   local containers
-  containers=$(get_resume_order) || {
-    echo "$NAME: [ERROR] Failed to discover containers for resuming"
-    return 1
-  }
+  containers=$(get_resume_order)
   
-  for name in $containers; do
-    if docker ps --filter "name=^${name}$" --format "{{.Names}}" | grep -q "^${name}$"; then
+  if [[ -z "$containers" ]]; then
+    echo "$NAME: [ERROR] No containers found for resuming"
+    return 1
+  fi
+  
+  while IFS= read -r name; do
+    if [[ -n "$name" ]] && docker ps --filter "name=^${name}$" --format "{{.Names}}" 2>/dev/null | grep -q "^${name}$"; then
       echo "$NAME: [INFO] resuming container: $name"
       docker unpause "$name" > /dev/null 2>&1 || {
         echo "$NAME: [WARN] Failed to resume container: $name"
       }
     fi
-  done
+  done <<< "$containers"
   frozen=false
   last_unpause_time=$(date +%s)
 }
