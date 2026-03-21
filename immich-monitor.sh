@@ -80,6 +80,7 @@ fi
 
 # Wait until docker is available
 start_time=$(date +%s)
+sleep 60  # Initial delay to allow system to stabilize and docker to start  
 while ! docker info > /dev/null 2>&1; do
   if (( $(date +%s) - start_time >= 600 )); then
     echo "$NAME: [ERROR] timeout: docker not available after 10 minutes."
